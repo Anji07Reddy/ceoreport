@@ -235,6 +235,21 @@ export async function getDashboardData(filters: DashboardFilters): Promise<Dashb
       dueDate: toDateString(t.dueDate),
     }));
 
+  // --- Recent activity ------------------------------------------------------
+  const recentLeads = [...leads]
+    .sort((a, b) => (b.createdDate?.getTime() ?? 0) - (a.createdDate?.getTime() ?? 0))
+    .slice(0, 12)
+    .map((l) => ({
+      id: l.id,
+      contact: l.contact || "—",
+      stage: l.stage,
+      source: l.source,
+      project: l.project,
+      staff: l.staff,
+      temperature: l.temperature,
+      date: toDateString(l.createdDate) || toDateString(l.reportDate),
+    }));
+
   // --- Filter options -------------------------------------------------------
   const uniq = (arr: string[]) => [...new Set(arr.filter(Boolean))].sort();
   const allDates = [...allLeads.map((l) => l.reportDate), ...allTasks.map((t) => t.reportDate)]
@@ -267,6 +282,7 @@ export async function getDashboardData(filters: DashboardFilters): Promise<Dashb
     sourceProjectMatrix: { projects: matrixProjects, rows: matrixRows },
     trend,
     followUps,
+    recentLeads,
     filterOptions,
   };
 }

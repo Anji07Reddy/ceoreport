@@ -115,7 +115,7 @@ export default function UploadPage() {
                   Imported <strong>{result.leads}</strong> lead rows (<strong>{result.uniqueLeads}</strong> unique new
                   leads) and <strong>{result.tasks}</strong> followups.
                 </p>
-                <Button type="button" size="sm" onClick={() => router.push("/dashboard")}>
+                <Button type="button" size="sm" onClick={() => router.push("/")}>
                   Go to dashboard
                 </Button>
               </div>

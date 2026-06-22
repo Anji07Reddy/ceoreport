@@ -79,8 +79,8 @@ export function DashboardClient() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between no-print">
         <div>
-          <h1 className="text-2xl font-bold">Anuhar Homes — CRM Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Executive Overview</h1>
+          <p className="text-sm text-slate-500">
             {data?.monthLabel ? `${data.monthLabel} · ` : ""}
             {dateLabel}
           </p>

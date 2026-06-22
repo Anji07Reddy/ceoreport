@@ -61,6 +61,17 @@ export interface FollowUpRow {
   dueDate: string;
 }
 
+export interface RecentLead {
+  id: string;
+  contact: string;
+  stage: string;
+  source: string;
+  project: string;
+  staff: string;
+  temperature: string;
+  date: string;
+}
+
 export interface TrendPoint {
   date: string;
   newLeads: number;
@@ -92,5 +103,6 @@ export interface DashboardData {
   sourceProjectMatrix: { projects: string[]; rows: MatrixRow[] };
   trend: TrendPoint[];
   followUps: FollowUpRow[];
+  recentLeads: RecentLead[];
   filterOptions: FilterOptions;
 }

@@ -1,7 +1,6 @@
-import { DashboardClient } from "@/components/dashboard/dashboard-client";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default function DashboardPage() {
-  return <DashboardClient />;
+// The dashboard now lives at the app root; keep this path working.
+export default function DashboardRedirect() {
+  redirect("/");
 }
