@@ -1,8 +1,7 @@
-// Prisma schema for the CRM Performance Report Dashboard.
+// Prisma schema — Anuhar Homes CRM Performance Dashboard.
 //
-// Using SQLite for zero-config local development. To use PostgreSQL instead,
-// set `provider = "postgresql"` below and point DATABASE_URL at your Postgres
-// instance — the rest of the schema is portable.
+// SQLite for zero-config local dev. Switch `provider` to "postgresql" and set
+// DATABASE_URL to a Postgres URL to use Postgres instead.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,52 +12,54 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// One ingest event = one day's worth of uploaded files.
+/// One ingest = one upload of the daily CRM Daily Leads + Followup exports.
 model Upload {
-  id          String   @id @default(cuid())
-  /// The business date the data represents (defaults to upload day).
-  reportDate  DateTime
-  /// When the files were actually uploaded.
-  createdAt   DateTime @default(now())
-  oppFileName String?
+  id           String   @id @default(cuid())
+  reportDate   DateTime
+  createdAt    DateTime @default(now())
+  leadFileName String?
   taskFileName String?
-  oppCount    Int      @default(0)
-  taskCount   Int      @default(0)
-  notes       String?
+  leadCount    Int      @default(0)
+  taskCount    Int      @default(0)
 
-  opportunities Opportunity[]
-  tasks         Task[]
+  leads Lead[]
+  tasks Task[]
 
   @@index([reportDate])
 }
 
-/// A single CRM lead / opportunity row.
-model Opportunity {
+/// A normalized CRM lead (from "CRM Daily Leads").
+model Lead {
   id          String    @id @default(cuid())
   uploadId    String
   upload      Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 
   externalId  String?
-  name        String?
-  project     String?
-  source      String?
-  /// Normalized lead stage: New | Warm | Cold | Site Visit | Won | Lost | Other
-  stage       String?
-  assignedTo  String?
-  status      String?
-  value       Float?
-  siteVisit   Boolean   @default(false)
+  contact     String?
+  phone       String?
+  email       String?
+  pipeline    String?
+  rawStage    String?
+  rawSource   String?
+  rawProject  String?
+
+  staff       String    // Nikhita | Anusha | Jyothi | Nalini | Unassigned
+  source      String    // Google | Meta | Organic | 99 Acres | Housing | Hoarding | CP | Other
+  project     String    // Anuhar Towers | RR Towers | Gauthami Heights | Pocharam | Other
+  stage       String    // New | Interested | SV Scheduled | SV Done | Closure | Lost
+  temperature String    // Hot | Warm | Cold | Lost
+  isFirst     Boolean   @default(true)
   createdDate DateTime?
   reportDate  DateTime
 
   @@index([reportDate])
-  @@index([project])
+  @@index([staff])
   @@index([source])
-  @@index([assignedTo])
+  @@index([project])
   @@index([stage])
 }
 
-/// A single task row from the Tasks workbook.
+/// A normalized followup task (from "Followup").
 model Task {
   id          String    @id @default(cuid())
   uploadId    String
@@ -66,16 +67,16 @@ model Task {
 
   externalId  String?
   title       String?
-  project     String?
-  assignedTo  String?
-  /// Normalized status: Completed | Pending | Overdue | Other
-  status      String?
-  dueDate     DateTime?
+  description String?
+  contact     String?
+  phone       String?
+  staff       String    // Nikhita | Anusha | Jyothi | Nalini | Unassigned
+  status      String    // Completed | Pending | Overdue
   createdDate DateTime?
+  dueDate     DateTime?
   reportDate  DateTime
 
   @@index([reportDate])
-  @@index([project])
-  @@index([assignedTo])
+  @@index([staff])
   @@index([status])
 }

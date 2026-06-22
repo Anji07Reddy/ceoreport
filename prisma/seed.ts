@@ -1,75 +1,75 @@
 /**
- * Seed the database with a few days of realistic sample CRM data so the
- * dashboard is demonstrable without a real upload.
- *
- *   npm run db:seed
+ * Seed realistic Anuhar Homes sample data so the dashboard is demonstrable
+ * without a real upload.   npm run db:seed
  */
 import { PrismaClient } from "@prisma/client";
-import { normalizeStage, normalizeTaskStatus } from "../src/lib/parse";
+import {
+  PROJECTS,
+  SOURCES,
+  STAFF,
+  markFirstContacts,
+  normalizeFunnelStage,
+  normalizeTaskStatus,
+  normalizeTemperature,
+  type ParsedLead,
+} from "../src/lib/parse";
 
 const prisma = new PrismaClient();
 
-const PROJECTS = ["Skyline Towers", "Green Valley", "Lake View", "Metro Heights"];
-const SOURCES = ["Facebook", "Google Ads", "Walk-in", "Referral", "Website", "99acres"];
-const STAFF = ["Aarav Sharma", "Priya Patel", "Rohan Mehta", "Sneha Iyer", "Vikram Rao"];
-const STAGES = ["New", "Warm", "Cold", "Site Visit", "Won", "Lost"];
-const TASK_TITLES = [
-  "Call back lead",
-  "Send brochure",
-  "Schedule site visit",
-  "Follow up on quotation",
-  "Confirm booking",
-  "Share floor plan",
-];
+const RAW_STAGES = ["New Lead", "Not interested", "Interested", "Details Shared", "SV Scheduled", "SV Done", "Sale Done", "Not Answered"];
+const RAW_STATUS = ["Cold", "Warm", "Hot", "Lost"];
 
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+const pick = <T,>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)];
+const rand = (n: number) => Math.floor(Math.random() * n);
 
 async function main() {
-  // Clear existing data for a clean seed.
-  await prisma.opportunity.deleteMany();
+  await prisma.lead.deleteMany();
   await prisma.task.deleteMany();
   await prisma.upload.deleteMany();
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  for (let dayOffset = 6; dayOffset >= 0; dayOffset--) {
+  // Stable phone pool so de-dup actually merges some repeat contacts.
+  const phones = Array.from({ length: 600 }, (_, i) => `+9190000${String(10000 + i)}`);
+
+  for (let dayOffset = 27; dayOffset >= 0; dayOffset--) {
     const reportDate = new Date(today);
     reportDate.setDate(today.getDate() - dayOffset);
 
-    const oppCount = 20 + Math.floor(Math.random() * 20);
-    const taskCount = 15 + Math.floor(Math.random() * 15);
+    const leadCount = 30 + rand(25);
+    const taskCount = 40 + rand(40);
 
-    const opportunities = Array.from({ length: oppCount }, () => {
-      const stageRaw = pick(STAGES);
-      const stage = normalizeStage(stageRaw);
+    const parsedLeads: ParsedLead[] = Array.from({ length: leadCount }, () => {
+      const rawStage = pick(RAW_STAGES);
+      const rawStatus = pick(RAW_STATUS);
+      const temperature = normalizeTemperature(rawStatus);
       return {
-        name: `Lead ${Math.floor(Math.random() * 9000) + 1000}`,
+        contact: `Lead ${1000 + rand(9000)}`,
+        phone: pick(phones),
+        email: "",
+        staff: pick(STAFF),
+        source: pick(SOURCES.filter((s) => s !== "Other")),
         project: pick(PROJECTS),
-        source: pick(SOURCES),
-        stage,
-        assignedTo: pick(STAFF),
-        status: stageRaw,
-        value: Math.floor(Math.random() * 50) * 100000,
-        siteVisit: stage === "Site Visit" || Math.random() > 0.7,
+        stage: normalizeFunnelStage(rawStage, temperature),
+        rawStage,
+        temperature,
+        isFirst: true,
         createdDate: reportDate,
-        reportDate,
       };
     });
+    markFirstContacts(parsedLeads);
 
     const tasks = Array.from({ length: taskCount }, () => {
       const dueDate = new Date(reportDate);
-      dueDate.setDate(reportDate.getDate() + Math.floor(Math.random() * 7) - 3);
-      const statusRaw = pick(["Completed", "Pending", "Open", "Overdue"]);
+      dueDate.setDate(reportDate.getDate() + rand(7) - 3);
+      const statusRaw = pick(["Completed", "Pending", "Completed", "Open"]);
       return {
-        title: pick(TASK_TITLES),
-        project: pick(PROJECTS),
-        assignedTo: pick(STAFF),
+        title: pick(["Call back lead", "Send brochure", "Schedule site visit", "Follow up", "Confirm booking"]),
+        staff: pick(STAFF),
         status: normalizeTaskStatus(statusRaw, dueDate),
-        dueDate,
         createdDate: reportDate,
+        dueDate,
         reportDate,
       };
     });
@@ -77,17 +77,31 @@ async function main() {
     await prisma.upload.create({
       data: {
         reportDate,
-        oppFileName: `opportunities-${reportDate.toISOString().slice(0, 10)}.csv`,
-        taskFileName: `tasks-${reportDate.toISOString().slice(0, 10)}.xlsx`,
-        oppCount,
+        leadFileName: `crm-leads-${reportDate.toISOString().slice(0, 10)}.csv`,
+        taskFileName: `followup-${reportDate.toISOString().slice(0, 10)}.xlsx`,
+        leadCount,
         taskCount,
-        opportunities: { create: opportunities },
+        leads: {
+          create: parsedLeads.map((l) => ({
+            contact: l.contact ?? null,
+            phone: l.phone ?? null,
+            staff: l.staff,
+            source: l.source,
+            project: l.project,
+            stage: l.stage,
+            temperature: l.temperature,
+            rawStage: l.rawStage ?? null,
+            isFirst: l.isFirst,
+            createdDate: l.createdDate,
+            reportDate,
+          })),
+        },
         tasks: { create: tasks },
       },
     });
-
-    console.log(`Seeded ${reportDate.toISOString().slice(0, 10)}: ${oppCount} opps, ${taskCount} tasks`);
   }
+  const uniqueLeads = await prisma.lead.count({ where: { isFirst: true } });
+  console.log(`Seeded 28 days. Unique new leads: ${uniqueLeads}`);
 }
 
 main()

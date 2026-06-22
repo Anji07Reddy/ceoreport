@@ -11,13 +11,14 @@ import { toDateString } from "@/lib/utils";
 
 interface UploadResult {
   reportDate: string;
-  opportunities: number;
+  leads: number;
+  uniqueLeads: number;
   tasks: number;
 }
 
 export default function UploadPage() {
   const router = useRouter();
-  const [oppFile, setOppFile] = useState<File | null>(null);
+  const [leadFile, setLeadFile] = useState<File | null>(null);
   const [taskFile, setTaskFile] = useState<File | null>(null);
   const [reportDate, setReportDate] = useState<string>(toDateString(new Date()));
   const [loading, setLoading] = useState(false);
@@ -28,14 +29,14 @@ export default function UploadPage() {
     e.preventDefault();
     setError(null);
     setResult(null);
-    if (!oppFile && !taskFile) {
+    if (!leadFile && !taskFile) {
       setError("Please choose at least one file to upload.");
       return;
     }
     setLoading(true);
     try {
       const fd = new FormData();
-      if (oppFile) fd.append("opportunities", oppFile);
+      if (leadFile) fd.append("leads", leadFile);
       if (taskFile) fd.append("tasks", taskFile);
       fd.append("reportDate", reportDate);
 
@@ -43,7 +44,7 @@ export default function UploadPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Upload failed.");
       setResult(json);
-      setOppFile(null);
+      setLeadFile(null);
       setTaskFile(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
@@ -57,29 +58,32 @@ export default function UploadPage() {
       <div>
         <h1 className="text-2xl font-bold">Daily Upload</h1>
         <p className="text-muted-foreground">
-          Upload the Opportunities CSV and Tasks Excel for the selected report date.
+          Upload the <strong>CRM Daily Leads</strong> and <strong>Followup</strong> exports for the selected date.
+          Values are cleaned and normalized automatically (staff, source, project & funnel stage).
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Upload files</CardTitle>
-          <CardDescription>CSV for opportunities, XLSX for tasks. Either or both.</CardDescription>
+          <CardDescription>CSV or Excel — either or both.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <FilePicker
-                label="Opportunities (.csv)"
+                label="CRM Daily Leads"
+                hint=".csv or .xlsx"
                 icon={<FileText className="h-6 w-6" />}
-                accept=".csv"
-                file={oppFile}
-                onSelect={setOppFile}
+                accept=".csv,.xlsx,.xls"
+                file={leadFile}
+                onSelect={setLeadFile}
               />
               <FilePicker
-                label="Tasks (.xlsx)"
+                label="Followup (Tasks)"
+                hint=".xlsx or .csv"
                 icon={<FileSpreadsheet className="h-6 w-6" />}
-                accept=".xlsx,.xls"
+                accept=".xlsx,.xls,.csv"
                 file={taskFile}
                 onSelect={setTaskFile}
               />
@@ -105,11 +109,11 @@ export default function UploadPage() {
             {result && (
               <div className="space-y-3 rounded-md bg-emerald-50 p-4 text-sm text-emerald-800">
                 <div className="flex items-center gap-2 font-medium">
-                  <CheckCircle2 className="h-4 w-4" /> Upload processed for {result.reportDate}
+                  <CheckCircle2 className="h-4 w-4" /> Processed for {result.reportDate}
                 </div>
                 <p>
-                  Imported <strong>{result.opportunities}</strong> opportunities and{" "}
-                  <strong>{result.tasks}</strong> tasks.
+                  Imported <strong>{result.leads}</strong> lead rows (<strong>{result.uniqueLeads}</strong> unique new
+                  leads) and <strong>{result.tasks}</strong> followups.
                 </p>
                 <Button type="button" size="sm" onClick={() => router.push("/dashboard")}>
                   Go to dashboard
@@ -135,28 +139,28 @@ export default function UploadPage() {
       <Card>
         <CardHeader>
           <CardTitle>Expected columns</CardTitle>
-          <CardDescription>Headers are auto-detected — these are common names we recognize.</CardDescription>
+          <CardDescription>Headers are auto-detected — common variants are recognized.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 text-sm sm:grid-cols-2">
           <div>
-            <p className="font-medium">Opportunities CSV</p>
+            <p className="font-medium">CRM Daily Leads</p>
             <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-              <li>Name / Customer</li>
-              <li>Project</li>
-              <li>Source / Lead Source</li>
-              <li>Lead Stage / Status (New, Warm, Cold, Site Visit, Won, Lost)</li>
-              <li>Assigned To / Staff</li>
-              <li>Created Date</li>
+              <li>Contact Name / Phone</li>
+              <li>Pipeline, Source, Tags</li>
+              <li>Project Name</li>
+              <li>Stage (New Lead, Interested, SV Scheduled, SV Done, Sale Done…)</li>
+              <li>Status (Cold / Warm / Hot / Lost)</li>
+              <li>Assigned Staff, Created date</li>
             </ul>
           </div>
           <div>
-            <p className="font-medium">Tasks XLSX</p>
+            <p className="font-medium">Followup</p>
             <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-              <li>Task / Title</li>
-              <li>Project</li>
+              <li>Title / Description</li>
+              <li>Contact, Phone</li>
+              <li>Status (Completed / Pending)</li>
               <li>Assigned To / Staff</li>
-              <li>Status (Completed, Pending, Overdue)</li>
-              <li>Due Date</li>
+              <li>Created On, Due Date</li>
             </ul>
           </div>
         </CardContent>
@@ -167,12 +171,14 @@ export default function UploadPage() {
 
 function FilePicker({
   label,
+  hint,
   icon,
   accept,
   file,
   onSelect,
 }: {
   label: string;
+  hint: string;
   icon: React.ReactNode;
   accept: string;
   file: File | null;
@@ -204,7 +210,7 @@ function FilePicker({
       {file ? (
         <p className="max-w-full truncate text-xs text-emerald-600">{file.name}</p>
       ) : (
-        <p className="text-xs text-muted-foreground">Click or drag a file here</p>
+        <p className="text-xs text-muted-foreground">Click or drag a file · {hint}</p>
       )}
       <input
         ref={inputRef}

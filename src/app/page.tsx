@@ -9,14 +9,14 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   let uploadCount = 0;
-  let oppCount = 0;
+  let leadCount = 0;
   let taskCount = 0;
   let lastUpload: { reportDate: Date } | null = null;
 
   try {
-    [uploadCount, oppCount, taskCount, lastUpload] = await Promise.all([
+    [uploadCount, leadCount, taskCount, lastUpload] = await Promise.all([
       prisma.upload.count(),
-      prisma.opportunity.count(),
+      prisma.lead.count(),
       prisma.task.count(),
       prisma.upload.findFirst({ orderBy: { reportDate: "desc" }, select: { reportDate: true } }),
     ]);
@@ -27,10 +27,11 @@ export default async function Home() {
   return (
     <div className="space-y-8">
       <section className="rounded-2xl bg-gradient-to-br from-primary to-blue-700 p-8 text-primary-foreground shadow-lg sm:p-12">
-        <h1 className="text-3xl font-bold sm:text-4xl">CRM Performance Dashboard</h1>
+        <h1 className="text-3xl font-bold sm:text-4xl">Anuhar Homes — CRM Performance Dashboard</h1>
         <p className="mt-3 max-w-2xl text-primary-foreground/90">
-          Upload your daily <strong>Opportunities CSV</strong> and <strong>Tasks Excel</strong> files. We
-          automatically clean, process, and visualize them into an executive-ready CRM performance report.
+          Upload your daily <strong>CRM Daily Leads</strong> and <strong>Followup</strong> exports. We automatically
+          clean &amp; normalize them (staff, source, project, funnel stage) and build every report — Executive
+          Overview, Team &amp; Source Performance, Weekly/Monthly summaries and more.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Button asChild size="lg" variant="secondary">
@@ -48,8 +49,8 @@ export default async function Home() {
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Daily uploads" value={formatNumber(uploadCount)} icon={<Database className="h-5 w-5" />} />
-        <StatCard label="Opportunities stored" value={formatNumber(oppCount)} icon={<Upload className="h-5 w-5" />} />
-        <StatCard label="Tasks stored" value={formatNumber(taskCount)} icon={<LayoutDashboard className="h-5 w-5" />} />
+        <StatCard label="Leads stored" value={formatNumber(leadCount)} icon={<Upload className="h-5 w-5" />} />
+        <StatCard label="Followups stored" value={formatNumber(taskCount)} icon={<LayoutDashboard className="h-5 w-5" />} />
         <StatCard
           label="Latest report date"
           value={lastUpload ? toDateString(lastUpload.reportDate) : "—"}
@@ -64,9 +65,9 @@ export default async function Home() {
             <CardDescription>How the daily ingest works</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>• Drop the Opportunities <code>.csv</code> and Tasks <code>.xlsx</code> for the day.</p>
-            <p>• Headers are auto-detected and values are normalized (lead stages, task status, dates).</p>
-            <p>• Each day&apos;s data is stored as a dated snapshot in the database.</p>
+            <p>• Drop the CRM Daily Leads and Followup exports for the day.</p>
+            <p>• Messy values are normalized (Nikitha→Nikhita, Kenyt→Google, Rami Reddy→RR Towers…).</p>
+            <p>• Leads are de-duplicated by contact so New Leads counts unique people.</p>
           </CardContent>
         </Card>
         <Card>
@@ -75,8 +76,8 @@ export default async function Home() {
             <CardDescription>What the dashboard delivers</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>• Executive KPI cards, project / staff / source reports, and a daily follow-up list.</p>
-            <p>• Interactive charts with filters for date, project, staff, source, stage & task status.</p>
+            <p>• Executive Overview, Team &amp; Source Performance, conversion analytics, Source × Project matrix.</p>
+            <p>• Funnel, source, team, stage &amp; trend charts with date/project/staff/source/stage filters.</p>
             <p>• One-click export to PDF and Excel.</p>
           </CardContent>
         </Card>

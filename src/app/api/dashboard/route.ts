@@ -5,8 +5,7 @@ import type { DashboardFilters } from "@/lib/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function readFilters(req: NextRequest): DashboardFilters {
-  const sp = req.nextUrl.searchParams;
+export function readFilters(sp: URLSearchParams): DashboardFilters {
   const get = (k: string) => {
     const v = sp.get(k);
     return v && v.trim() && v !== "all" ? v.trim() : undefined;
@@ -15,7 +14,7 @@ function readFilters(req: NextRequest): DashboardFilters {
     dateFrom: get("dateFrom"),
     dateTo: get("dateTo"),
     project: get("project"),
-    assignedTo: get("assignedTo"),
+    staff: get("staff"),
     source: get("source"),
     stage: get("stage"),
     taskStatus: get("taskStatus"),
@@ -24,7 +23,7 @@ function readFilters(req: NextRequest): DashboardFilters {
 
 export async function GET(req: NextRequest) {
   try {
-    const data = await getDashboardData(readFilters(req));
+    const data = await getDashboardData(readFilters(req.nextUrl.searchParams));
     return NextResponse.json(data);
   } catch (err) {
     console.error("Dashboard error:", err);

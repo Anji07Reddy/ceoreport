@@ -51,9 +51,9 @@ export function FilterBar({
       />
       <FilterSelect
         label="Assigned staff"
-        value={filters.assignedTo}
+        value={filters.staff}
         options={options.staff}
-        onChange={(v) => onChange({ assignedTo: v })}
+        onChange={(v) => onChange({ staff: v })}
       />
       <FilterSelect
         label="Source"

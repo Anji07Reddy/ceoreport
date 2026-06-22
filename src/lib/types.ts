@@ -1,26 +1,39 @@
-// Shared types for the dashboard data contracts.
+// Shared data contracts for the Anuhar Homes CRM dashboard.
 
 export interface DashboardFilters {
   dateFrom?: string;
   dateTo?: string;
   project?: string;
-  assignedTo?: string;
+  staff?: string;
   source?: string;
   stage?: string;
   taskStatus?: string;
 }
 
-export interface OverviewCards {
-  totalLeads: number;
+/** The core funnel metrics, reused across every report grouping. */
+export interface FunnelMetrics {
   newLeads: number;
-  warmLeads: number;
-  coldLeads: number;
-  siteVisits: number;
+  followUps: number;
+  interested: number;
+  svScheduled: number;
+  svDone: number;
+  closures: number;
+  svShowUpRate: number; // SV Done / SV Scheduled
+  leadToInterested: number; // Interested / New Leads
+  interestedToSv: number; // SV Scheduled / Interested
+  closurePerSv: number; // Closures / SV Done
+  leadToSvDone: number; // SV Done / New Leads
+}
+
+export interface OverviewCards extends FunnelMetrics {
+  totalLeads: number;
   completedTasks: number;
   pendingTasks: number;
   overdueTasks: number;
-  totalTasks: number;
-  conversionRate: number; // won / total leads %
+  hot: number;
+  warm: number;
+  cold: number;
+  lost: number;
 }
 
 export interface NamedCount {
@@ -28,51 +41,31 @@ export interface NamedCount {
   value: number;
 }
 
-export interface ProjectReportRow {
-  project: string;
-  totalLeads: number;
-  siteVisits: number;
-  won: number;
-  tasks: number;
-  completedTasks: number;
+export interface GroupRow extends FunnelMetrics {
+  key: string; // staff / source / project / week / month label
 }
 
-export interface StaffReportRow {
-  staff: string;
-  leads: number;
-  siteVisits: number;
-  won: number;
-  tasks: number;
-  completed: number;
-  pending: number;
-  overdue: number;
-  completionRate: number;
-}
-
-export interface SourceReportRow {
+export interface MatrixRow {
   source: string;
-  totalLeads: number;
-  warm: number;
-  cold: number;
-  won: number;
-  siteVisits: number;
-  qualityScore: number; // weighted quality %
+  cells: Record<string, number>; // project -> count
+  total: number;
+  sharePct: number;
 }
 
 export interface FollowUpRow {
   id: string;
   title: string;
-  project: string;
-  assignedTo: string;
+  contact: string;
+  staff: string;
   status: string;
   dueDate: string;
 }
 
 export interface TrendPoint {
   date: string;
-  leads: number;
-  siteVisits: number;
-  completedTasks: number;
+  newLeads: number;
+  svDone: number;
+  followUps: number;
 }
 
 export interface FilterOptions {
@@ -85,14 +78,19 @@ export interface FilterOptions {
 }
 
 export interface DashboardData {
+  monthLabel: string;
   overview: OverviewCards;
   stageBreakdown: NamedCount[];
-  sourceBreakdown: NamedCount[];
-  staffPerformance: StaffReportRow[];
+  temperatureBreakdown: NamedCount[];
   taskStatusBreakdown: NamedCount[];
+  sourceBreakdown: NamedCount[];
+  byStaff: GroupRow[];
+  bySource: GroupRow[];
+  byProject: GroupRow[];
+  byWeek: GroupRow[];
+  byMonth: GroupRow[];
+  sourceProjectMatrix: { projects: string[]; rows: MatrixRow[] };
   trend: TrendPoint[];
-  projectReport: ProjectReportRow[];
-  sourceReport: SourceReportRow[];
   followUps: FollowUpRow[];
   filterOptions: FilterOptions;
 }

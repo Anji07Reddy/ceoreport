@@ -1,288 +1,271 @@
 import { prisma } from "@/lib/prisma";
+import { PROJECTS } from "@/lib/parse";
 import type {
   DashboardData,
   DashboardFilters,
   FilterOptions,
   FollowUpRow,
+  FunnelMetrics,
+  GroupRow,
+  MatrixRow,
   NamedCount,
   OverviewCards,
-  ProjectReportRow,
-  SourceReportRow,
-  StaffReportRow,
   TrendPoint,
 } from "@/lib/types";
 import { toDateString } from "@/lib/utils";
 
-type OppWhere = {
-  reportDate?: { gte?: Date; lte?: Date };
-  project?: string;
-  assignedTo?: string;
-  source?: string;
-  stage?: string;
+type LeadRow = {
+  id: string;
+  staff: string;
+  source: string;
+  project: string;
+  stage: string;
+  temperature: string;
+  isFirst: boolean;
+  contact: string | null;
+  reportDate: Date;
+  createdDate: Date | null;
 };
 
-type TaskWhere = {
-  reportDate?: { gte?: Date; lte?: Date };
-  project?: string;
-  assignedTo?: string;
-  status?: string;
+type TaskRow = {
+  id: string;
+  staff: string;
+  status: string;
+  title: string | null;
+  contact: string | null;
+  dueDate: Date | null;
+  reportDate: Date;
 };
 
-function dateRange(filters: DashboardFilters) {
+function dateRange(f: DashboardFilters) {
   const range: { gte?: Date; lte?: Date } = {};
-  if (filters.dateFrom) range.gte = new Date(filters.dateFrom);
-  if (filters.dateTo) {
-    const to = new Date(filters.dateTo);
+  if (f.dateFrom) range.gte = new Date(f.dateFrom);
+  if (f.dateTo) {
+    const to = new Date(f.dateTo);
     to.setHours(23, 59, 59, 999);
     range.lte = to;
   }
   return Object.keys(range).length ? range : undefined;
 }
 
-function buildOppWhere(filters: DashboardFilters): OppWhere {
-  const where: OppWhere = {};
-  const range = dateRange(filters);
-  if (range) where.reportDate = range;
-  if (filters.project) where.project = filters.project;
-  if (filters.assignedTo) where.assignedTo = filters.assignedTo;
-  if (filters.source) where.source = filters.source;
-  if (filters.stage) where.stage = filters.stage;
-  return where;
+const rate = (num: number, den: number) => (den > 0 ? (num / den) * 100 : 0);
+
+/** Compute the funnel metrics for a set of (deduped) leads + their tasks. */
+function funnel(leads: LeadRow[], followUpCount: number): FunnelMetrics {
+  const newLeads = leads.length; // already deduped to first/representative rows
+  const interested = leads.filter((l) => l.stage === "Interested").length;
+  const svScheduled = leads.filter((l) => l.stage === "SV Scheduled").length;
+  const svDone = leads.filter((l) => l.stage === "SV Done").length;
+  const closures = leads.filter((l) => l.stage === "Closure").length;
+  return {
+    newLeads,
+    followUps: followUpCount,
+    interested,
+    svScheduled,
+    svDone,
+    closures,
+    svShowUpRate: rate(svDone, svScheduled),
+    leadToInterested: rate(interested, newLeads),
+    interestedToSv: rate(svScheduled, interested),
+    closurePerSv: rate(closures, svDone),
+    leadToSvDone: rate(svDone, newLeads),
+  };
 }
 
-function buildTaskWhere(filters: DashboardFilters): TaskWhere {
-  const where: TaskWhere = {};
-  const range = dateRange(filters);
-  if (range) where.reportDate = range;
-  if (filters.project) where.project = filters.project;
-  if (filters.assignedTo) where.assignedTo = filters.assignedTo;
-  if (filters.taskStatus) where.status = filters.taskStatus;
-  return where;
+function groupBy(
+  leads: LeadRow[],
+  tasks: TaskRow[],
+  keyFn: (l: LeadRow) => string,
+  /** Omit to skip task attribution (e.g. tasks have no source/project). */
+  taskKeyFn?: (t: TaskRow) => string
+): GroupRow[] {
+  const leadGroups = new Map<string, LeadRow[]>();
+  for (const l of leads) {
+    const k = keyFn(l);
+    const arr = leadGroups.get(k) ?? [];
+    arr.push(l);
+    leadGroups.set(k, arr);
+  }
+  const taskCounts = new Map<string, number>();
+  if (taskKeyFn) {
+    for (const t of tasks) {
+      const k = taskKeyFn(t);
+      taskCounts.set(k, (taskCounts.get(k) ?? 0) + 1);
+    }
+  }
+  const keys = new Set<string>([...leadGroups.keys(), ...taskCounts.keys()]);
+  return [...keys]
+    .map((key) => ({ key, ...funnel(leadGroups.get(key) ?? [], taskCounts.get(key) ?? 0) }))
+    .sort((a, b) => b.svDone - a.svDone || b.newLeads - a.newLeads);
 }
 
-const labelOf = (v: string | null | undefined) => (v && v.trim() ? v.trim() : "Unassigned");
+/** ISO week-of-month bucket label, e.g. "Week 1". */
+function weekOfMonth(d: Date): string {
+  return `Week ${Math.ceil(d.getDate() / 7)}`;
+}
+function monthLabelOf(d: Date): string {
+  return d.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
 
-export async function getDashboardData(
-  filters: DashboardFilters
-): Promise<DashboardData> {
-  const oppWhere = buildOppWhere(filters);
-  const taskWhere = buildTaskWhere(filters);
+export async function getDashboardData(filters: DashboardFilters): Promise<DashboardData> {
+  const range = dateRange(filters);
 
-  const [opps, tasks, allOpps, allTasks] = await Promise.all([
-    prisma.opportunity.findMany({ where: oppWhere }),
+  const leadWhere: Record<string, unknown> = { isFirst: true };
+  if (range) leadWhere.reportDate = range;
+  if (filters.project) leadWhere.project = filters.project;
+  if (filters.staff) leadWhere.staff = filters.staff;
+  if (filters.source) leadWhere.source = filters.source;
+  if (filters.stage) leadWhere.stage = filters.stage;
+
+  const taskWhere: Record<string, unknown> = {};
+  if (range) taskWhere.reportDate = range;
+  if (filters.staff) taskWhere.staff = filters.staff;
+  if (filters.project) {
+    // tasks have no project; skip project filter for tasks
+  }
+  if (filters.taskStatus) taskWhere.status = filters.taskStatus;
+
+  const [leadsRaw, tasksRaw, allLeads, allTasks] = await Promise.all([
+    prisma.lead.findMany({ where: leadWhere }),
     prisma.task.findMany({ where: taskWhere }),
-    // Unfiltered sets are used only to compute available filter options.
-    prisma.opportunity.findMany({
-      select: { project: true, source: true, assignedTo: true, stage: true, reportDate: true },
-    }),
-    prisma.task.findMany({
-      select: { project: true, assignedTo: true, status: true, reportDate: true },
-    }),
+    prisma.lead.findMany({ where: { isFirst: true }, select: { project: true, source: true, staff: true, stage: true, reportDate: true } }),
+    prisma.task.findMany({ select: { staff: true, status: true, reportDate: true } }),
   ]);
+  const leads = leadsRaw as LeadRow[];
+  const tasks = tasksRaw as TaskRow[];
 
-  // --- Overview cards -------------------------------------------------------
+  // --- Overview -------------------------------------------------------------
+  const base = funnel(leads, tasks.length);
   const overview: OverviewCards = {
-    totalLeads: opps.length,
-    newLeads: opps.filter((o) => o.stage === "New").length,
-    warmLeads: opps.filter((o) => o.stage === "Warm").length,
-    coldLeads: opps.filter((o) => o.stage === "Cold").length,
-    siteVisits: opps.filter((o) => o.siteVisit || o.stage === "Site Visit").length,
+    ...base,
+    totalLeads: leads.length,
     completedTasks: tasks.filter((t) => t.status === "Completed").length,
     pendingTasks: tasks.filter((t) => t.status === "Pending").length,
     overdueTasks: tasks.filter((t) => t.status === "Overdue").length,
-    totalTasks: tasks.length,
-    conversionRate: 0,
+    hot: leads.filter((l) => l.temperature === "Hot").length,
+    warm: leads.filter((l) => l.temperature === "Warm").length,
+    cold: leads.filter((l) => l.temperature === "Cold").length,
+    lost: leads.filter((l) => l.temperature === "Lost").length,
   };
-  const won = opps.filter((o) => o.stage === "Won").length;
-  overview.conversionRate = opps.length ? (won / opps.length) * 100 : 0;
 
-  // --- Stage breakdown (pie) ------------------------------------------------
-  const stageMap = new Map<string, number>();
-  for (const o of opps) {
-    const k = o.stage || "Other";
-    stageMap.set(k, (stageMap.get(k) || 0) + 1);
-  }
-  const stageBreakdown: NamedCount[] = [...stageMap.entries()].map(([name, value]) => ({ name, value }));
+  // --- Breakdowns -----------------------------------------------------------
+  const countMap = (arr: string[]): NamedCount[] => {
+    const m = new Map<string, number>();
+    for (const v of arr) m.set(v, (m.get(v) ?? 0) + 1);
+    return [...m.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  };
 
-  // --- Source breakdown (bar) -----------------------------------------------
-  const sourceMap = new Map<string, number>();
-  for (const o of opps) {
-    const k = labelOf(o.source);
-    sourceMap.set(k, (sourceMap.get(k) || 0) + 1);
-  }
-  const sourceBreakdown: NamedCount[] = [...sourceMap.entries()]
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
+  const stageBreakdown = countMap(leads.map((l) => l.stage));
+  const temperatureBreakdown = countMap(leads.map((l) => l.temperature));
+  const taskStatusBreakdown = countMap(tasks.map((t) => t.status));
+  const sourceBreakdown = countMap(leads.map((l) => l.source));
 
-  // --- Task status breakdown ------------------------------------------------
-  const taskStatusMap = new Map<string, number>();
-  for (const t of tasks) {
-    const k = t.status || "Other";
-    taskStatusMap.set(k, (taskStatusMap.get(k) || 0) + 1);
-  }
-  const taskStatusBreakdown: NamedCount[] = [...taskStatusMap.entries()].map(([name, value]) => ({ name, value }));
+  // --- Grouped reports ------------------------------------------------------
+  const byStaff = groupBy(leads, tasks, (l) => l.staff, (t) => t.staff);
+  const bySource = groupBy(leads, tasks, (l) => l.source);
+  const byProject = groupBy(leads, tasks, (l) => l.project);
+  const byWeek = groupBy(
+    leads,
+    tasks,
+    (l) => weekOfMonth(l.reportDate),
+    (t) => weekOfMonth(t.reportDate)
+  ).sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+  const byMonth = groupBy(
+    leads,
+    tasks,
+    (l) => monthLabelOf(l.reportDate),
+    (t) => monthLabelOf(t.reportDate)
+  );
 
-  // --- Staff performance ----------------------------------------------------
-  const staffMap = new Map<string, StaffReportRow>();
-  const ensureStaff = (name: string): StaffReportRow => {
-    let row = staffMap.get(name);
+  // --- Source × Project matrix ---------------------------------------------
+  const projectCols = [...PROJECTS];
+  const matrixMap = new Map<string, MatrixRow>();
+  for (const l of leads) {
+    let row = matrixMap.get(l.source);
     if (!row) {
-      row = {
-        staff: name,
-        leads: 0,
-        siteVisits: 0,
-        won: 0,
-        tasks: 0,
-        completed: 0,
-        pending: 0,
-        overdue: 0,
-        completionRate: 0,
-      };
-      staffMap.set(name, row);
+      row = { source: l.source, cells: Object.fromEntries(projectCols.map((p) => [p, 0])), total: 0, sharePct: 0 };
+      matrixMap.set(l.source, row);
     }
-    return row;
-  };
-  for (const o of opps) {
-    const row = ensureStaff(labelOf(o.assignedTo));
-    row.leads += 1;
-    if (o.siteVisit || o.stage === "Site Visit") row.siteVisits += 1;
-    if (o.stage === "Won") row.won += 1;
+    const col = projectCols.includes(l.project as (typeof PROJECTS)[number]) ? l.project : "Other";
+    if (!(col in row.cells)) row.cells[col] = 0;
+    row.cells[col] += 1;
+    row.total += 1;
   }
-  for (const t of tasks) {
-    const row = ensureStaff(labelOf(t.assignedTo));
-    row.tasks += 1;
-    if (t.status === "Completed") row.completed += 1;
-    else if (t.status === "Pending") row.pending += 1;
-    else if (t.status === "Overdue") row.overdue += 1;
-  }
-  const staffPerformance = [...staffMap.values()]
-    .map((r) => ({ ...r, completionRate: r.tasks ? (r.completed / r.tasks) * 100 : 0 }))
-    .sort((a, b) => b.leads + b.tasks - (a.leads + a.tasks));
+  const grand = [...matrixMap.values()].reduce((s, r) => s + r.total, 0);
+  const matrixRows = [...matrixMap.values()]
+    .map((r) => ({ ...r, sharePct: rate(r.total, grand) }))
+    .sort((a, b) => b.total - a.total);
+  const matrixProjects = [...new Set([...projectCols, ...matrixRows.flatMap((r) => Object.keys(r.cells))])];
 
-  // --- Project report -------------------------------------------------------
-  const projectMap = new Map<string, ProjectReportRow>();
-  const ensureProject = (name: string): ProjectReportRow => {
-    let row = projectMap.get(name);
-    if (!row) {
-      row = { project: name, totalLeads: 0, siteVisits: 0, won: 0, tasks: 0, completedTasks: 0 };
-      projectMap.set(name, row);
-    }
-    return row;
-  };
-  for (const o of opps) {
-    const row = ensureProject(labelOf(o.project));
-    row.totalLeads += 1;
-    if (o.siteVisit || o.stage === "Site Visit") row.siteVisits += 1;
-    if (o.stage === "Won") row.won += 1;
-  }
-  for (const t of tasks) {
-    const row = ensureProject(labelOf(t.project));
-    row.tasks += 1;
-    if (t.status === "Completed") row.completedTasks += 1;
-  }
-  const projectReport = [...projectMap.values()].sort((a, b) => b.totalLeads - a.totalLeads);
-
-  // --- Source quality report ------------------------------------------------
-  const srcMap = new Map<string, SourceReportRow>();
-  const ensureSrc = (name: string): SourceReportRow => {
-    let row = srcMap.get(name);
-    if (!row) {
-      row = { source: name, totalLeads: 0, warm: 0, cold: 0, won: 0, siteVisits: 0, qualityScore: 0 };
-      srcMap.set(name, row);
-    }
-    return row;
-  };
-  for (const o of opps) {
-    const row = ensureSrc(labelOf(o.source));
-    row.totalLeads += 1;
-    if (o.stage === "Warm") row.warm += 1;
-    if (o.stage === "Cold") row.cold += 1;
-    if (o.stage === "Won") row.won += 1;
-    if (o.siteVisit || o.stage === "Site Visit") row.siteVisits += 1;
-  }
-  const sourceReport = [...srcMap.values()]
-    .map((r) => {
-      // Weighted quality: won counts most, then site visits, then warm leads.
-      const score = r.totalLeads
-        ? ((r.won * 3 + r.siteVisits * 2 + r.warm * 1) / (r.totalLeads * 3)) * 100
-        : 0;
-      return { ...r, qualityScore: Math.min(100, score) };
-    })
-    .sort((a, b) => b.qualityScore - a.qualityScore);
-
-  // --- Daily follow-up report (pending + overdue tasks) ---------------------
-  const followUps: FollowUpRow[] = tasks
-    .filter((t) => t.status === "Pending" || t.status === "Overdue")
-    .sort((a, b) => {
-      const da = a.dueDate ? a.dueDate.getTime() : Infinity;
-      const db = b.dueDate ? b.dueDate.getTime() : Infinity;
-      return da - db;
-    })
-    .slice(0, 200)
-    .map((t) => ({
-      id: t.id,
-      title: t.title || "(Untitled task)",
-      project: labelOf(t.project),
-      assignedTo: labelOf(t.assignedTo),
-      status: t.status || "Pending",
-      dueDate: toDateString(t.dueDate),
-    }));
-
-  // --- Daily trend ----------------------------------------------------------
+  // --- Trend ----------------------------------------------------------------
   const trendMap = new Map<string, TrendPoint>();
-  const ensureTrend = (date: string): TrendPoint => {
-    let row = trendMap.get(date);
-    if (!row) {
-      row = { date, leads: 0, siteVisits: 0, completedTasks: 0 };
-      trendMap.set(date, row);
+  const ensureTrend = (d: string) => {
+    let r = trendMap.get(d);
+    if (!r) {
+      r = { date: d, newLeads: 0, svDone: 0, followUps: 0 };
+      trendMap.set(d, r);
     }
-    return row;
+    return r;
   };
-  for (const o of opps) {
-    const d = toDateString(o.reportDate);
+  for (const l of leads) {
+    const d = toDateString(l.reportDate);
     if (!d) continue;
-    const row = ensureTrend(d);
-    row.leads += 1;
-    if (o.siteVisit || o.stage === "Site Visit") row.siteVisits += 1;
+    const r = ensureTrend(d);
+    r.newLeads += 1;
+    if (l.stage === "SV Done") r.svDone += 1;
   }
   for (const t of tasks) {
     const d = toDateString(t.reportDate);
     if (!d) continue;
-    const row = ensureTrend(d);
-    if (t.status === "Completed") row.completedTasks += 1;
+    ensureTrend(d).followUps += 1;
   }
   const trend = [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-  // --- Filter options (from full dataset) -----------------------------------
-  const uniq = (arr: (string | null)[]) =>
-    [...new Set(arr.map((v) => (v && v.trim() ? v.trim() : "")).filter(Boolean))].sort();
+  // --- Follow-up list -------------------------------------------------------
+  const followUps: FollowUpRow[] = tasks
+    .filter((t) => t.status !== "Completed")
+    .sort((a, b) => (a.dueDate?.getTime() ?? Infinity) - (b.dueDate?.getTime() ?? Infinity))
+    .slice(0, 250)
+    .map((t) => ({
+      id: t.id,
+      title: t.title || "(Untitled)",
+      contact: t.contact || "—",
+      staff: t.staff,
+      status: t.status,
+      dueDate: toDateString(t.dueDate),
+    }));
 
-  const allDates = [...allOpps.map((o) => o.reportDate), ...allTasks.map((t) => t.reportDate)]
-    .map((d) => toDateString(d))
+  // --- Filter options -------------------------------------------------------
+  const uniq = (arr: string[]) => [...new Set(arr.filter(Boolean))].sort();
+  const allDates = [...allLeads.map((l) => l.reportDate), ...allTasks.map((t) => t.reportDate)]
+    .map(toDateString)
     .filter(Boolean)
     .sort();
-
   const filterOptions: FilterOptions = {
-    projects: uniq([...allOpps.map((o) => o.project), ...allTasks.map((t) => t.project)]),
-    staff: uniq([...allOpps.map((o) => o.assignedTo), ...allTasks.map((t) => t.assignedTo)]),
-    sources: uniq(allOpps.map((o) => o.source)),
-    stages: uniq(allOpps.map((o) => o.stage)),
+    projects: uniq(allLeads.map((l) => l.project)),
+    staff: uniq([...allLeads.map((l) => l.staff), ...allTasks.map((t) => t.staff)]),
+    sources: uniq(allLeads.map((l) => l.source)),
+    stages: uniq(allLeads.map((l) => l.stage)),
     taskStatuses: uniq(allTasks.map((t) => t.status)),
-    dateRange: {
-      min: allDates[0] || "",
-      max: allDates[allDates.length - 1] || "",
-    },
+    dateRange: { min: allDates[0] || "", max: allDates[allDates.length - 1] || "" },
   };
 
+  const monthLabel = byMonth[0]?.key || (allDates.length ? monthLabelOf(new Date(allDates[allDates.length - 1])) : "—");
+
   return {
+    monthLabel,
     overview,
     stageBreakdown,
-    sourceBreakdown,
-    staffPerformance,
+    temperatureBreakdown,
     taskStatusBreakdown,
+    sourceBreakdown,
+    byStaff,
+    bySource,
+    byProject,
+    byWeek,
+    byMonth,
+    sourceProjectMatrix: { projects: matrixProjects, rows: matrixRows },
     trend,
-    projectReport,
-    sourceReport,
     followUps,
     filterOptions,
   };

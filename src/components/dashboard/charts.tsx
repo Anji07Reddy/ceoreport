@@ -15,75 +15,45 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { NamedCount, StaffReportRow, TrendPoint } from "@/lib/types";
+import type { GroupRow, NamedCount, OverviewCards, TrendPoint } from "@/lib/types";
 
-const PALETTE = [
-  "#2563eb",
-  "#16a34a",
-  "#f59e0b",
-  "#dc2626",
-  "#7c3aed",
-  "#0891b2",
-  "#db2777",
-  "#65a30d",
-  "#ea580c",
-  "#475569",
-];
+const PALETTE = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#475569"];
 
 const STAGE_COLORS: Record<string, string> = {
   New: "#2563eb",
-  Warm: "#f59e0b",
-  Cold: "#0891b2",
-  "Site Visit": "#7c3aed",
-  Won: "#16a34a",
+  Interested: "#f59e0b",
+  "SV Scheduled": "#7c3aed",
+  "SV Done": "#0891b2",
+  Closure: "#16a34a",
   Lost: "#dc2626",
-  Other: "#94a3b8",
 };
+const TEMP_COLORS: Record<string, string> = { Hot: "#dc2626", Warm: "#f59e0b", Cold: "#0891b2", Lost: "#94a3b8" };
+const TASK_COLORS: Record<string, string> = { Completed: "#16a34a", Pending: "#f59e0b", Overdue: "#dc2626" };
 
-const TASK_COLORS: Record<string, string> = {
-  Completed: "#16a34a",
-  Pending: "#f59e0b",
-  Overdue: "#dc2626",
-  Other: "#94a3b8",
-};
-
-function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
-      {label}
-    </div>
-  );
+function Empty({ label }: { label: string }) {
+  return <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">{label}</div>;
 }
 
-export function StagePieChart({ data }: { data: NamedCount[] }) {
-  if (!data.length) return <EmptyState label="No lead stage data" />;
+/** Horizontal funnel bar: New → Interested → SV Scheduled → SV Done → Closures. */
+export function FunnelChart({ overview }: { overview: OverviewCards }) {
+  const data = [
+    { name: "New Leads", value: overview.newLeads },
+    { name: "Interested", value: overview.interested },
+    { name: "SV Scheduled", value: overview.svScheduled },
+    { name: "SV Done", value: overview.svDone },
+    { name: "Closures", value: overview.closures },
+  ];
+  if (!overview.newLeads) return <Empty label="No lead data" />;
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
-          {data.map((entry, i) => (
-            <Cell key={entry.name} fill={STAGE_COLORS[entry.name] ?? PALETTE[i % PALETTE.length]} />
-          ))}
-        </Pie>
+      <BarChart data={data} layout="vertical" margin={{ left: 24, right: 24, top: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+        <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 12 }} />
         <Tooltip />
-        <Legend />
-      </PieChart>
-    </ResponsiveContainer>
-  );
-}
-
-export function SourceBarChart({ data }: { data: NamedCount[] }) {
-  if (!data.length) return <EmptyState label="No source data" />;
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-        <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
-        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-        <Tooltip />
-        <Bar dataKey="value" name="Leads" radius={[4, 4, 0, 0]}>
-          {data.map((entry, i) => (
-            <Cell key={entry.name} fill={PALETTE[i % PALETTE.length]} />
+        <Bar dataKey="value" name="Leads" radius={[0, 4, 4, 0]}>
+          {data.map((_, i) => (
+            <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
           ))}
         </Bar>
       </BarChart>
@@ -91,33 +61,14 @@ export function SourceBarChart({ data }: { data: NamedCount[] }) {
   );
 }
 
-export function StaffPerformanceChart({ data }: { data: StaffReportRow[] }) {
-  const top = data.slice(0, 10);
-  if (!top.length) return <EmptyState label="No staff data" />;
-  return (
-    <ResponsiveContainer width="100%" height={320}>
-      <BarChart data={top} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-        <XAxis dataKey="staff" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
-        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-        <Tooltip />
-        <Legend />
-        <Bar dataKey="leads" name="Leads" fill="#2563eb" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="siteVisits" name="Site Visits" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="completed" name="Tasks Done" fill="#16a34a" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-export function TaskStatusChart({ data }: { data: NamedCount[] }) {
-  if (!data.length) return <EmptyState label="No task data" />;
+export function StagePie({ data }: { data: NamedCount[] }) {
+  if (!data.length) return <Empty label="No stage data" />;
   return (
     <ResponsiveContainer width="100%" height={280}>
       <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} label>
-          {data.map((entry, i) => (
-            <Cell key={entry.name} fill={TASK_COLORS[entry.name] ?? PALETTE[i % PALETTE.length]} />
+        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+          {data.map((e, i) => (
+            <Cell key={e.name} fill={STAGE_COLORS[e.name] ?? PALETTE[i % PALETTE.length]} />
           ))}
         </Pie>
         <Tooltip />
@@ -127,8 +78,81 @@ export function TaskStatusChart({ data }: { data: NamedCount[] }) {
   );
 }
 
-export function DailyTrendChart({ data }: { data: TrendPoint[] }) {
-  if (!data.length) return <EmptyState label="No trend data" />;
+export function TemperaturePie({ data }: { data: NamedCount[] }) {
+  if (!data.length) return <Empty label="No temperature data" />;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <PieChart>
+        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} label>
+          {data.map((e, i) => (
+            <Cell key={e.name} fill={TEMP_COLORS[e.name] ?? PALETTE[i % PALETTE.length]} />
+          ))}
+        </Pie>
+        <Tooltip />
+        <Legend />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function TaskStatusPie({ data }: { data: NamedCount[] }) {
+  if (!data.length) return <Empty label="No task data" />;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <PieChart>
+        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} label>
+          {data.map((e, i) => (
+            <Cell key={e.name} fill={TASK_COLORS[e.name] ?? PALETTE[i % PALETTE.length]} />
+          ))}
+        </Pie>
+        <Tooltip />
+        <Legend />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function SourceBar({ data }: { data: NamedCount[] }) {
+  if (!data.length) return <Empty label="No source data" />;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={56} />
+        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+        <Tooltip />
+        <Bar dataKey="value" name="Leads" radius={[4, 4, 0, 0]}>
+          {data.map((_, i) => (
+            <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Grouped bars per team member: New / SV Done / Closures. */
+export function TeamBar({ data }: { data: GroupRow[] }) {
+  const rows = data.slice(0, 10);
+  if (!rows.length) return <Empty label="No team data" />;
+  return (
+    <ResponsiveContainer width="100%" height={320}>
+      <BarChart data={rows} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="key" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={56} />
+        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+        <Tooltip />
+        <Legend />
+        <Bar dataKey="newLeads" name="New Leads" fill="#2563eb" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="svDone" name="SV Done" fill="#0891b2" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="closures" name="Closures" fill="#16a34a" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function TrendChart({ data }: { data: TrendPoint[] }) {
+  if (!data.length) return <Empty label="No trend data" />;
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
@@ -137,16 +161,9 @@ export function DailyTrendChart({ data }: { data: TrendPoint[] }) {
         <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
         <Tooltip />
         <Legend />
-        <Line type="monotone" dataKey="leads" name="Leads" stroke="#2563eb" strokeWidth={2} dot={false} />
-        <Line type="monotone" dataKey="siteVisits" name="Site Visits" stroke="#7c3aed" strokeWidth={2} dot={false} />
-        <Line
-          type="monotone"
-          dataKey="completedTasks"
-          name="Completed Tasks"
-          stroke="#16a34a"
-          strokeWidth={2}
-          dot={false}
-        />
+        <Line type="monotone" dataKey="newLeads" name="New Leads" stroke="#2563eb" strokeWidth={2} dot={false} />
+        <Line type="monotone" dataKey="followUps" name="Follow-ups" stroke="#f59e0b" strokeWidth={2} dot={false} />
+        <Line type="monotone" dataKey="svDone" name="SV Done" stroke="#16a34a" strokeWidth={2} dot={false} />
       </LineChart>
     </ResponsiveContainer>
   );

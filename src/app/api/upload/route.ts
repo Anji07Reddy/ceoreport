@@ -1,31 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { parseOpportunitiesCsv, parseTasksXlsx } from "@/lib/parse";
+import { ingestFile, markFirstContacts, type ParsedLead, type ParsedTask } from "@/lib/parse";
 
 export const runtime = "nodejs";
 
 /**
- * POST /api/upload
- * multipart/form-data with fields:
- *   - opportunities: CSV file (optional but recommended)
- *   - tasks:         XLSX file (optional but recommended)
- *   - reportDate:    YYYY-MM-DD (optional, defaults to today)
+ * POST /api/upload  (multipart/form-data)
+ *   - leads:      CRM Daily Leads export (.csv or .xlsx)
+ *   - tasks:      Followup export (.xlsx or .csv)
+ *   - reportDate: YYYY-MM-DD (optional, defaults to today)
+ *
+ * Each file is auto-detected; an xlsx containing a "CRM Daily Leads" /
+ * "Followup" sheet is handled too. Leads are de-duplicated by contact so
+ * "New Leads" counts unique first contacts.
  */
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
-    const oppFile = form.get("opportunities") as File | null;
+    const leadFile = form.get("leads") as File | null;
     const taskFile = form.get("tasks") as File | null;
     const reportDateRaw = (form.get("reportDate") as string | null)?.trim();
 
-    if (!oppFile && !taskFile) {
+    if (!leadFile && !taskFile) {
       return NextResponse.json(
-        { error: "Please upload at least one file (Opportunities CSV or Tasks XLSX)." },
+        { error: "Please upload at least one file (CRM Daily Leads or Followup)." },
         { status: 400 }
       );
     }
 
-    // Resolve the business date for this snapshot.
     let reportDate = new Date();
     if (reportDateRaw) {
       const d = new Date(reportDateRaw);
@@ -33,73 +35,70 @@ export async function POST(req: NextRequest) {
     }
     reportDate.setHours(0, 0, 0, 0);
 
-    // --- Parse opportunities --------------------------------------------------
-    let parsedOpps: ReturnType<typeof parseOpportunitiesCsv> = [];
-    if (oppFile) {
-      const name = oppFile.name.toLowerCase();
-      if (!name.endsWith(".csv")) {
-        return NextResponse.json(
-          { error: "Opportunities file must be a .csv file." },
-          { status: 400 }
-        );
-      }
-      const text = await oppFile.text();
-      parsedOpps = parseOpportunitiesCsv(text);
-    }
+    let leads: ParsedLead[] = [];
+    let tasks: ParsedTask[] = [];
 
-    // --- Parse tasks ----------------------------------------------------------
-    let parsedTasks: ReturnType<typeof parseTasksXlsx> = [];
+    if (leadFile) {
+      const buf = Buffer.from(await leadFile.arrayBuffer());
+      const res = ingestFile(leadFile.name, buf, "leads");
+      leads = leads.concat(res.leads);
+      tasks = tasks.concat(res.tasks); // in case the leads file also held a Followup sheet
+    }
     if (taskFile) {
-      const name = taskFile.name.toLowerCase();
-      if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
-        return NextResponse.json(
-          { error: "Tasks file must be a .xlsx / .xls file." },
-          { status: 400 }
-        );
-      }
       const buf = Buffer.from(await taskFile.arrayBuffer());
-      parsedTasks = parseTasksXlsx(buf);
+      const res = ingestFile(taskFile.name, buf, "tasks");
+      tasks = tasks.concat(res.tasks);
+      leads = leads.concat(res.leads);
     }
 
-    if (parsedOpps.length === 0 && parsedTasks.length === 0) {
+    if (leads.length === 0 && tasks.length === 0) {
       return NextResponse.json(
-        { error: "No valid rows were found in the uploaded files. Please check the format." },
+        { error: "No valid rows found. Make sure the files have the expected columns." },
         { status: 422 }
       );
     }
 
-    // --- Persist as one dated snapshot ---------------------------------------
+    markFirstContacts(leads);
+    const uniqueLeads = leads.filter((l) => l.isFirst).length;
+
     const upload = await prisma.upload.create({
       data: {
         reportDate,
-        oppFileName: oppFile?.name ?? null,
+        leadFileName: leadFile?.name ?? null,
         taskFileName: taskFile?.name ?? null,
-        oppCount: parsedOpps.length,
-        taskCount: parsedTasks.length,
-        opportunities: {
-          create: parsedOpps.map((o) => ({
-            externalId: o.externalId ?? null,
-            name: o.name ?? null,
-            project: o.project ?? null,
-            source: o.source ?? null,
-            stage: o.stage,
-            assignedTo: o.assignedTo ?? null,
-            status: o.status ?? null,
-            value: o.value,
-            siteVisit: o.siteVisit,
-            createdDate: o.createdDate,
+        leadCount: leads.length,
+        taskCount: tasks.length,
+        leads: {
+          create: leads.map((l) => ({
+            externalId: l.externalId ?? null,
+            contact: l.contact ?? null,
+            phone: l.phone ?? null,
+            email: l.email ?? null,
+            pipeline: l.pipeline ?? null,
+            rawStage: l.rawStage ?? null,
+            rawSource: l.rawSource ?? null,
+            rawProject: l.rawProject ?? null,
+            staff: l.staff,
+            source: l.source,
+            project: l.project,
+            stage: l.stage,
+            temperature: l.temperature,
+            isFirst: l.isFirst,
+            createdDate: l.createdDate,
             reportDate,
           })),
         },
         tasks: {
-          create: parsedTasks.map((t) => ({
+          create: tasks.map((t) => ({
             externalId: t.externalId ?? null,
             title: t.title ?? null,
-            project: t.project ?? null,
-            assignedTo: t.assignedTo ?? null,
+            description: t.description ?? null,
+            contact: t.contact ?? null,
+            phone: t.phone ?? null,
+            staff: t.staff,
             status: t.status,
-            dueDate: t.dueDate,
             createdDate: t.createdDate,
+            dueDate: t.dueDate,
             reportDate,
           })),
         },
@@ -110,8 +109,9 @@ export async function POST(req: NextRequest) {
       success: true,
       uploadId: upload.id,
       reportDate: reportDate.toISOString().slice(0, 10),
-      opportunities: parsedOpps.length,
-      tasks: parsedTasks.length,
+      leads: leads.length,
+      uniqueLeads,
+      tasks: tasks.length,
     });
   } catch (err) {
     console.error("Upload error:", err);
