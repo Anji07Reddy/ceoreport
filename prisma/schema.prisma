@@ -1,0 +1,81 @@
+// Prisma schema for the CRM Performance Report Dashboard.
+//
+// Using SQLite for zero-config local development. To use PostgreSQL instead,
+// set `provider = "postgresql"` below and point DATABASE_URL at your Postgres
+// instance — the rest of the schema is portable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// One ingest event = one day's worth of uploaded files.
+model Upload {
+  id          String   @id @default(cuid())
+  /// The business date the data represents (defaults to upload day).
+  reportDate  DateTime
+  /// When the files were actually uploaded.
+  createdAt   DateTime @default(now())
+  oppFileName String?
+  taskFileName String?
+  oppCount    Int      @default(0)
+  taskCount   Int      @default(0)
+  notes       String?
+
+  opportunities Opportunity[]
+  tasks         Task[]
+
+  @@index([reportDate])
+}
+
+/// A single CRM lead / opportunity row.
+model Opportunity {
+  id          String    @id @default(cuid())
+  uploadId    String
+  upload      Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  externalId  String?
+  name        String?
+  project     String?
+  source      String?
+  /// Normalized lead stage: New | Warm | Cold | Site Visit | Won | Lost | Other
+  stage       String?
+  assignedTo  String?
+  status      String?
+  value       Float?
+  siteVisit   Boolean   @default(false)
+  createdDate DateTime?
+  reportDate  DateTime
+
+  @@index([reportDate])
+  @@index([project])
+  @@index([source])
+  @@index([assignedTo])
+  @@index([stage])
+}
+
+/// A single task row from the Tasks workbook.
+model Task {
+  id          String    @id @default(cuid())
+  uploadId    String
+  upload      Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  externalId  String?
+  title       String?
+  project     String?
+  assignedTo  String?
+  /// Normalized status: Completed | Pending | Overdue | Other
+  status      String?
+  dueDate     DateTime?
+  createdDate DateTime?
+  reportDate  DateTime
+
+  @@index([reportDate])
+  @@index([project])
+  @@index([assignedTo])
+  @@index([status])
+}
